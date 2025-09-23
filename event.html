@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>QR Check-in</title>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body>
+  <h2>Event Check-in</h2>
+  <div id="reader" style="width:300px;"></div>
+  <p id="result">Scan QR...</p>
+
+  <script>
+    const formURL = "https://docs.google.com/forms/d/e/1FAIpQLSekUitqlChBTS_lu0pniJUgmaiI6LiwgkFNgC_VA0uDTlwORg/formResponse";
+    const fieldID = "entry.835567957";
+
+    function submitToForm(ticketId) {
+      fetch(formURL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `${fieldID}=${encodeURIComponent(ticketId)}`
+      }).then(() => {
+        document.getElementById("result").innerText = "✅ Checked in: " + ticketId;
+      });
+    }
+
+    function onScanSuccess(qrMessage) {
+      submitToForm(qrMessage);
+    }
+
+    const html5QrCode = new Html5Qrcode("reader");
+    Html5Qrcode.getCameras().then(devices => {
+      if (devices && devices.length) {
+        html5QrCode.start(
+          devices[0].id,
+          { fps: 10, qrbox: 250 },
+          onScanSuccess
+        );
+      }
+    });
+  </script>
+</body>
+</html>
