@@ -2,16 +2,153 @@
 <html>
 <head>
   <title>QR Check-in</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://unpkg.com/html5-qrcode"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    
+    .container {
+      max-width: 100%;
+      margin: 0 auto;
+      text-align: center;
+    }
+    
+    h2 {
+      color: #333;
+      margin-bottom: 20px;
+    }
+    
+    #reader {
+      width: 100%;
+      max-width: 400px;
+      margin: 0 auto 20px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    
+    #result {
+      font-size: 16px;
+      font-weight: bold;
+      padding: 15px;
+      border-radius: 8px;
+      margin: 20px 0;
+      background-color: #fff;
+      border: 1px solid #ddd;
+    }
+    
+    .success {
+      background-color: #d4edda !important;
+      color: #155724;
+      border-color: #c3e6cb !important;
+    }
+    
+    .qr-data {
+      background-color: #e7f3ff;
+      color: #004085;
+      border-color: #b3d7ff !important;
+      margin: 10px 0;
+      word-break: break-all;
+      font-family: monospace;
+    }
+    
+    .camera-controls {
+      margin: 20px 0;
+    }
+    
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      margin: 5px;
+      min-width: 120px;
+    }
+    
+    button:hover {
+      background-color: #0056b3;
+    }
+    
+    button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
+    
+    .scan-more-btn {
+      background-color: #28a745;
+      font-size: 18px;
+      padding: 15px 30px;
+    }
+    
+    .scan-more-btn:hover {
+      background-color: #218838;
+    }
+    
+    .camera-select {
+      margin: 10px 0;
+    }
+    
+    select {
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background-color: white;
+      min-width: 200px;
+    }
+    
+    @media (max-width: 480px) {
+      body {
+        padding: 10px;
+      }
+      
+      button {
+        width: 100%;
+        margin: 5px 0;
+      }
+      
+      select {
+        width: 100%;
+      }
+    }
+  </style>
 </head>
 <body>
-  <h2>Event Check-in</h2>
-  <div id="reader" style="width:300px;"></div>
-  <p id="result">Scan QR...</p>
+  <div class="container">
+    <h2>Event Check-in</h2>
+    
+    <div class="camera-controls">
+      <div class="camera-select">
+        <select id="cameraSelect">
+          <option value="">Select Camera...</option>
+        </select>
+      </div>
+      <button id="startBtn">Start Scanner</button>
+      <button id="stopBtn" disabled>Stop Scanner</button>
+    </div>
+    
+    <div id="reader"></div>
+    <p id="result">Select a camera and start scanning...</p>
+    <div id="qrData" class="qr-data" style="display: none;"></div>
+    <button id="scanMoreBtn" class="scan-more-btn" style="display: none;">Scan More QR Codes</button>
+  </div>
 
   <script>
     const formURL = "https://docs.google.com/forms/d/e/1FAIpQLSekUitqlChBTS_lu0pniJUgmaiI6LiwgkFNgC_VA0uDTlwORg/formResponse";
     const fieldID = "entry.835567957";
+    
+    let html5QrCode = null;
+    let isScanning = false;
+    let cameras = [];
+    let lastSelectedCamera = null;
 
     function submitToForm(ticketId) {
       fetch(formURL, {
@@ -20,22 +157,172 @@
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: `${fieldID}=${encodeURIComponent(ticketId)}`
       }).then(() => {
-        document.getElementById("result").innerText = "✅ Checked in: " + ticketId;
+        const resultElement = document.getElementById("result");
+        const qrDataElement = document.getElementById("qrData");
+        const scanMoreBtn = document.getElementById("scanMoreBtn");
+        
+        resultElement.innerText = "✅ Successfully Checked In!";
+        resultElement.classList.add("success");
+        
+        // Show QR data
+        qrDataElement.innerHTML = `<strong>QR Code Data:</strong><br>${ticketId}`;
+        qrDataElement.style.display = "block";
+        
+        // Show scan more button
+        scanMoreBtn.style.display = "inline-block";
+        
+        // Stop the scanner after successful scan
+        stopScanner();
       });
     }
 
     function onScanSuccess(qrMessage) {
+      // Stop scanning immediately after successful scan
       submitToForm(qrMessage);
     }
 
-    const html5QrCode = new Html5Qrcode("reader");
-    Html5Qrcode.getCameras().then(devices => {
-      if (devices && devices.length) {
-        html5QrCode.start(
-          devices[0].id,
-          { fps: 10, qrbox: 250 },
-          onScanSuccess
+    function onScanError(errorMessage) {
+      // Handle scan errors silently
+    }
+
+    async function initializeCameras() {
+      try {
+        cameras = await Html5Qrcode.getCameras();
+        const cameraSelect = document.getElementById("cameraSelect");
+        
+        // Clear existing options
+        cameraSelect.innerHTML = '<option value="">Select Camera...</option>';
+        
+        if (cameras && cameras.length > 0) {
+          cameras.forEach((camera, index) => {
+            const option = document.createElement("option");
+            option.value = camera.id;
+            
+            // Try to identify front/back cameras
+            const label = camera.label.toLowerCase();
+            let displayName = camera.label;
+            
+            if (label.includes('back') || label.includes('rear')) {
+              displayName = `📷 Back Camera (${index + 1})`;
+            } else if (label.includes('front') || label.includes('user')) {
+              displayName = `🤳 Front Camera (${index + 1})`;
+            } else {
+              displayName = `📹 Camera ${index + 1}`;
+            }
+            
+            option.text = displayName;
+            cameraSelect.add(option);
+          });
+          
+          // Auto-select back camera if available
+          const backCamera = cameras.find(camera => 
+            camera.label.toLowerCase().includes('back') || 
+            camera.label.toLowerCase().includes('rear')
+          );
+          
+          if (backCamera) {
+            cameraSelect.value = backCamera.id;
+            lastSelectedCamera = backCamera.id;
+          }
+        } else {
+          document.getElementById("result").innerText = "No cameras found on this device.";
+        }
+      } catch (error) {
+        console.error("Error getting cameras:", error);
+        document.getElementById("result").innerText = "Error accessing cameras. Please allow camera permissions.";
+      }
+    }
+
+    async function startScanner() {
+      const selectedCameraId = document.getElementById("cameraSelect").value;
+      
+      if (!selectedCameraId) {
+        alert("Please select a camera first.");
+        return;
+      }
+      
+      try {
+        if (!html5QrCode) {
+          html5QrCode = new Html5Qrcode("reader");
+        }
+        
+        await html5QrCode.start(
+          selectedCameraId,
+          { 
+            fps: 10, 
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+          },
+          onScanSuccess,
+          onScanError
         );
+        
+        isScanning = true;
+        lastSelectedCamera = selectedCameraId;
+        document.getElementById("startBtn").disabled = true;
+        document.getElementById("stopBtn").disabled = false;
+        document.getElementById("cameraSelect").disabled = true;
+        document.getElementById("result").innerText = "Scanner active. Point camera at QR code...";
+        
+        // Hide previous results when starting new scan
+        document.getElementById("qrData").style.display = "none";
+        document.getElementById("scanMoreBtn").style.display = "none";
+        document.getElementById("result").classList.remove("success");
+        
+      } catch (error) {
+        console.error("Error starting scanner:", error);
+        document.getElementById("result").innerText = "Error starting scanner: " + error.message;
+      }
+    }
+
+    async function stopScanner() {
+      if (html5QrCode && isScanning) {
+        try {
+          await html5QrCode.stop();
+          isScanning = false;
+          document.getElementById("startBtn").disabled = false;
+          document.getElementById("stopBtn").disabled = true;
+          document.getElementById("cameraSelect").disabled = false;
+        } catch (error) {
+          console.error("Error stopping scanner:", error);
+        }
+      }
+    }
+
+    function scanMore() {
+      // Reset UI and restart scanning with the last selected camera
+      document.getElementById("result").innerText = "Ready to scan...";
+      document.getElementById("result").classList.remove("success");
+      document.getElementById("qrData").style.display = "none";
+      document.getElementById("scanMoreBtn").style.display = "none";
+      
+      // Restore last selected camera
+      if (lastSelectedCamera) {
+        document.getElementById("cameraSelect").value = lastSelectedCamera;
+      }
+      
+      // Start scanning again
+      startScanner();
+    }
+
+    // Event listeners
+    document.getElementById("startBtn").addEventListener("click", startScanner);
+    document.getElementById("stopBtn").addEventListener("click", stopScanner);
+    document.getElementById("scanMoreBtn").addEventListener("click", scanMore);
+    
+    document.getElementById("cameraSelect").addEventListener("change", function() {
+      if (isScanning) {
+        stopScanner();
+      }
+    });
+
+    // Initialize on page load
+    window.addEventListener("load", initializeCameras);
+    
+    // Handle page visibility changes
+    document.addEventListener("visibilitychange", function() {
+      if (document.hidden && isScanning) {
+        stopScanner();
       }
     });
   </script>
